@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="Albaranes" />
+  <meta name="theme-color" content="#185FA5" />
+  <title>Escáner de Albaranes</title>
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- ================================================================
+       🔧 CONFIGURACIÓN — EDITA ESTAS DOS LÍNEAS
+       ================================================================ -->
+  <script>
+    // 1. Pega aquí la URL de tu Google Apps Script desplegado
+    //    (Desplegar > Nueva implementación > Aplicación web > Copiar URL)
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/TU_ID_AQUI/exec";
+
+    // 2. Pega aquí tu API Key de Anthropic
+    //    (console.anthropic.com > API Keys)
+    const ANTHROPIC_API_KEY = "sk-ant-TU_CLAVE_AQUI";
+  </script>
+  <!-- ================================================================ -->
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --blue:       #185FA5;
+      --blue-light: #E6F1FB;
+      --blue-dark:  #0C447C;
+      --green:      #3B6D11;
+      --green-light:#EAF3DE;
+      --red:        #A32D2D;
+      --red-light:  #FCEBEB;
+      --amber:      #854F0B;
+      --amber-light:#FAEEDA;
+      --gray-100:   #F5F5F5;
+      --gray-200:   #E8E8E8;
+      --gray-400:   #9E9E9E;
+      --gray-700:   #444;
+      --gray-900:   #1a1a1a;
+      --radius:     12px;
+      --radius-sm:  8px;
+      --safe-top:   env(safe-area-inset-top, 0px);
+      --safe-bot:   env(safe-area-inset-bottom, 0px);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f4f9;
+      color: var(--gray-900);
+      min-height: 100dvh;
+      padding-bottom: calc(1rem + var(--safe-bot));
+    }
+
+    /* ---- TOPBAR ---- */
+    .topbar {
+      background: var(--blue);
+      color: white;
+      padding: calc(0.75rem + var(--safe-top)) 1rem 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .topbar-icon { font-size: 22px; }
+    .topbar h1 { font-size: 17px; font-weight: 600; }
+    .topbar p  { font-size: 12px; opacity: 0.75; }
+
+    /* ---- STEPS ---- */
+    .steps {
+      display: flex;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: white;
+      border-bottom: 1px solid var(--gray-200);
+      gap: 6px;
+    }
+    .step-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--gray-400); }
+    .step-item.active { color: var(--blue); font-weight: 600; }
+    .step-item.done   { color: var(--green); }
+    .step-num {
+      width: 22px; height: 22px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; flex-shrink: 0;
+      background: var(--gray-200); color: var(--gray-400);
+    }
+    .step-item.active .step-num { background: var(--blue); color: white; }
+    .step-item.done   .step-num { background: var(--green); color: white; }
+    .step-sep { flex: 1; height: 1px; background: var(--gray-200); }
+
+    /* ---- MAIN ---- */
+    .main { padding: 1rem; max-width: 480px; margin: 0 auto; }
+
+    /* ---- CARD ---- */
+    .card {
+      background: white;
+      border-radius: var(--radius);
+      padding: 1rem 1.25rem;
+      margin-bottom: 0.875rem;
+      border: 1px solid var(--gray-200);
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--gray-400); margin-bottom: 10px;
+    }
+
+    /* ---- CAMERA ZONE ---- */
+    .cam-zone {
+      border: 2px dashed var(--gray-200);
+      border-radius: var(--radius-sm);
+      min-height: 220px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 10px; cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      padding: 1rem;
+    }
+    .cam-zone:active { background: var(--gray-100); border-color: var(--blue); }
+    .cam-zone svg { width: 48px; height: 48px; color: var(--gray-400); }
+    .cam-zone .cam-label { font-size: 15px; font-weight: 500; color: var(--gray-700); }
+    .cam-zone .cam-sub   { font-size: 13px; color: var(--gray-400); }
+
+    #preview-img {
+      width: 100%; border-radius: var(--radius-sm);
+      display: none; max-height: 340px; object-fit: contain;
+    }
+    #file-input { display: none; }
+
+    /* ---- FIELDS ---- */
+    .field { margin-bottom: 10px; }
+    .field-label {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--gray-400); margin-bottom: 4px;
+    }
+    .field-val {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--gray-100); border-radius: var(--radius-sm);
+      padding: 9px 12px; font-size: 14px; min-height: 40px;
+    }
+    .field-val svg { flex-shrink: 0; width: 16px; height: 16px; color: var(--gray-400); }
+    .field-val input {
+      background: transparent; border: none; outline: none;
+      font-size: 14px; font-family: inherit; width: 100%;
+      color: var(--gray-900);
+    }
+    .field-val.editable { border: 1px solid var(--gray-200); background: white; }
+    .badge {
+      font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 99px; margin-left: auto; white-space: nowrap;
+    }
+    .badge-ai  { background: var(--blue-light); color: var(--blue-dark); }
+    .badge-gps { background: var(--green-light); color: var(--green); }
+
+    /* ---- BUTTONS ---- */
+    .btn {
+      width: 100%; padding: 13px;
+      border: none; border-radius: var(--radius-sm);
+      font-size: 15px; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      font-family: inherit; transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .btn-primary  { background: var(--blue); color: white; margin-bottom: 8px; }
+    .btn-secondary {
+      background: white; color: var(--gray-700);
+      border: 1px solid var(--gray-200); margin-bottom: 8px;
+    }
+    .btn-success  { background: var(--green); color: white; margin-bottom: 8px; }
+
+    /* ---- STATUS ---- */
+    .status {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 12px; border-radius: var(--radius-sm);
+      font-size: 13px; margin-bottom: 10px; line-height: 1.4;
+    }
+    .status svg { flex-shrink: 0; width: 16px; height: 16px; margin-top: 1px; }
+    .status.info    { background: var(--blue-light);  color: var(--blue-dark); }
+    .status.success { background: var(--green-light); color: var(--green); }
+    .status.error   { background: var(--red-light);   color: var(--red); }
+    .status.loading { background: var(--gray-100);    color: var(--gray-700); }
+    .status.warning { background: var(--amber-light); color: var(--amber); }
+
+    .spinner {
+      width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;
+      border: 2px solid currentColor; border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- RESULT ---- */
+    .result-card {
+      background: white; border-radius: var(--radius);
+      border: 2px solid var(--green); padding: 1rem 1.25rem;
+      margin-bottom: 0.875rem;
+    }
+    .result-header {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 12px; font-size: 15px; font-weight: 600; color: var(--green);
+    }
+    .result-link {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--blue); color: white;
+      padding: 11px 14px; border-radius: var(--radius-sm);
+      text-decoration: none; font-size: 14px; font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    /* ---- INSTALL BANNER ---- */
+    #install-banner {
+      background: var(--blue); color: white;
+      padding: 0.75rem 1rem;
+      display: none; align-items: center; gap: 10px;
+      font-size: 13px;
+    }
+    #install-banner button {
+      margin-left: auto; background: white; color: var(--blue);
+      border: none; border-radius: 6px; padding: 5px 12px;
+      font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+<!-- Banner de instalación PWA -->
+<div id="install-banner">
+  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 12-4-4m4 4 4-4M4 20h16"/></svg>
+  <span>Instala la app en tu móvil</span>
+  <button id="btn-instalar">Instalar</button>
+</div>
+
+<!-- Topbar -->
+<div class="topbar">
+  <svg class="topbar-icon" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4"/></svg>
+  <div>
+    <h1>Escáner de Albaranes</h1>
+    <p>Foto · IA · Google Drive</p>
+  </div>
+</div>
+
+<!-- Steps -->
+<div class="steps" id="steps-bar">
+  <div class="step-item active" id="step1">
+    <div class="step-num">1</div><span>Foto</span>
+  </div>
+  <div class="step-sep"></div>
+  <div class="step-item" id="step2">
+    <div class="step-num">2</div><span>Datos</span>
+  </div>
+  <div class="step-sep"></div>
+  <div class="step-item" id="step3">
+    <div class="step-num">3</div><span>Drive</span>
+  </div>
+</div>
+
+<!-- ===================== PANEL 1: FOTO ===================== -->
+<div class="main" id="panel-foto">
+
+  <div class="card">
+    <div class="card-title">Fotografía del albarán</div>
+    <div class="cam-zone" id="cam-zone" onclick="document.getElementById('file-input').click()" role="button" aria-label="Abrir cámara">
+      <svg fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+      </svg>
+      <span class="cam-label">Toca para fotografiar</span>
+      <span class="cam-sub">Apunta la cámara al albarán firmado</span>
+    </div>
+    <img id="preview-img" alt="Vista previa del albarán capturado" />
+    <input type="file" id="file-input" accept="image/*" capture="environment" />
+  </div>
+
+  <div id="gps-status" class="status loading hidden">
+    <div class="spinner"></div>
+    <span>Obteniendo ubicación GPS...</span>
+  </div>
+
+  <button class="btn btn-primary" id="btn-analizar" disabled>
+    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"/></svg>
+    Analizar con IA
+  </button>
+
+</div>
+
+<!-- ===================== PANEL 2: DATOS ===================== -->
+<div class="main hidden" id="panel-datos">
+
+  <div id="ai-status" class="status loading">
+    <div class="spinner"></div>
+    <span>Analizando imagen con IA...</span>
+  </div>
+
+  <div class="card hidden" id="datos-card">
+    <div class="card-title">Datos extraídos</div>
+
+    <div class="field">
+      <div class="field-label">Número de albarán</div>
+      <div class="field-val editable">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 8.25h15m-16.5 7.5h15m-1.8-13.5-3.9 19.5m-2.1-19.5-3.9 19.5"/></svg>
+        <input type="text" id="num-albaran" placeholder="Ej. ALB-2024-0123" />
+        <span class="badge badge-ai">IA</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">Fecha y hora</div>
+      <div class="field-val">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
+        <span id="fecha-hora">—</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">Dirección</div>
+      <div class="field-val">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z"/></svg>
+        <span id="ubicacion" style="font-size:13px;">—</span>
+        <span class="badge badge-gps">GPS</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field-label">Coordenadas</div>
+      <div class="field-val">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418"/></svg>
+        <span id="coords" style="font-size:12px; font-family: monospace;">—</span>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-success hidden" id="btn-subir">
+    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5"/></svg>
+    Generar PDF y guardar en Drive
+  </button>
+  <button class="btn btn-secondary hidden" id="btn-retomar">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18"/></svg>
+    Cambiar foto
+  </button>
+</div>
+
+<!-- ===================== PANEL 3: DRIVE ===================== -->
+<div class="main hidden" id="panel-drive">
+
+  <div id="drive-status" class="status loading">
+    <div class="spinner"></div>
+    <span>Generando PDF y subiendo a Google Drive...</span>
+  </div>
+
+  <div class="result-card hidden" id="result-card">
+    <div class="result-header">
+      <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+      Albarán guardado correctamente
+    </div>
+    <div class="field">
+      <div class="field-label">Archivo PDF</div>
+      <div class="field-val">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="color:#A32D2D;" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+        <span id="drive-filename" style="font-size:13px; word-break:break-all;">—</span>
+      </div>
+    </div>
+    <div class="field">
+      <div class="field-label">Carpeta en Drive</div>
+      <div class="field-val">
+        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>
+        <span id="drive-carpeta" style="font-size:13px;">Albaranes / —</span>
+      </div>
+    </div>
+  </div>
+
+  <a id="btn-abrir-drive" href="#" class="result-link hidden" target="_blank" rel="noopener">
+    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+    Abrir PDF en Google Drive
+  </a>
+  <button class="btn btn-secondary hidden" id="btn-nuevo">
+    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+    Nuevo albarán
+  </button>
+</div>
+
+<script>
+// ============================================================
+//  ESTADO GLOBAL
+// ============================================================
+let imageBase64 = null;
+let imageMime   = 'image/jpeg';
+let gpsData     = null;
+let captureTime = null;
+let deferredPrompt = null;
+
+// ============================================================
+//  INSTALACIÓN PWA
+// ============================================================
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById('install-banner').style.display = 'flex';
+});
+
+document.getElementById('btn-instalar').addEventListener('click', async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  const { outcome } = await deferredPrompt.userChoice;
+  if (outcome === 'accepted') {
+    document.getElementById('install-banner').style.display = 'none';
+  }
+  deferredPrompt = null;
+});
+
+// ============================================================
+//  PASO 1 — FOTO + GPS
+// ============================================================
+const fileInput   = document.getElementById('file-input');
+const previewImg  = document.getElementById('preview-img');
+const camZone     = document.getElementById('cam-zone');
+const btnAnalizar = document.getElementById('btn-analizar');
+const gpsStatus   = document.getElementById('gps-status');
+
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  imageMime = file.type || 'image/jpeg';
+  const reader = new FileReader();
+  reader.onload = ev => {
+    imageBase64 = ev.target.result.split(',')[1];
+    previewImg.src = ev.target.result;
+    previewImg.style.display = 'block';
+    camZone.style.display = 'none';
+    captureTime = new Date();
+    btnAnalizar.disabled = false;
+    obtenerGPS();
+  };
+  reader.readAsDataURL(file);
+});
+
+function obtenerGPS() {
+  gpsStatus.classList.remove('hidden');
+  if (!navigator.geolocation) {
+    gpsData = { lat: null, lng: null, address: 'GPS no disponible' };
+    mostrarGPSOk();
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      gpsData = {
+        lat: pos.coords.latitude.toFixed(6),
+        lng: pos.coords.longitude.toFixed(6),
+        address: null
+      };
+      // Geocodificación inversa gratuita con Nominatim
+      fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gpsData.lat}&lon=${gpsData.lng}&format=json`)
+        .then(r => r.json())
+        .then(d => {
+          const p = d.address || {};
+          gpsData.address = [p.road, p.house_number, p.city || p.town || p.village, p.postcode]
+            .filter(Boolean).join(', ');
+        })
+        .catch(() => {})
+        .finally(() => mostrarGPSOk());
+    },
+    () => {
+      gpsData = { lat: null, lng: null, address: 'Ubicación no disponible' };
+      mostrarGPSError();
+    },
+    { timeout: 10000, enableHighAccuracy: true }
+  );
+}
+
+function mostrarGPSOk() {
+  gpsStatus.innerHTML = svgCheck() + '<span>Ubicación capturada</span>';
+  gpsStatus.className = 'status success';
+}
+function mostrarGPSError() {
+  gpsStatus.innerHTML = svgWarn() + '<span>No se pudo obtener el GPS — el albarán se guardará sin coordenadas</span>';
+  gpsStatus.className = 'status warning';
+}
+
+// ============================================================
+//  PASO 2 — ANÁLISIS IA
+// ============================================================
+btnAnalizar.addEventListener('click', async () => {
+  setStep(2);
+  document.getElementById('panel-foto').classList.add('hidden');
+  document.getElementById('panel-datos').classList.remove('hidden');
+
+  const aiStatus  = document.getElementById('ai-status');
+  const datosCard = document.getElementById('datos-card');
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 500,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: imageMime, data: imageBase64 }
+            },
+            {
+              type: 'text',
+              text: 'Eres un extractor de datos de documentos logísticos. Analiza esta imagen de un albarán y extrae el número de albarán principal (puede ser alfanumérico, con prefijos ALB, DN, DEL, o solo números). Responde ÚNICAMENTE con JSON sin markdown ni explicación: {"numero_albaran":"...","confianza":"alta|media|baja"}. Si no encuentras número, usa "NO_ENCONTRADO".'
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await resp.json();
+    const texto = (data.content || []).map(b => b.text || '').join('');
+    let parsed = { numero_albaran: 'NO_ENCONTRADO', confianza: 'baja' };
+    try { parsed = JSON.parse(texto.replace(/```[a-z]*|```/g, '').trim()); } catch(_) {}
+
+    const num = parsed.numero_albaran;
+    document.getElementById('num-albaran').value = (num && num !== 'NO_ENCONTRADO') ? num : '';
+
+    // Fecha y hora
+    const t = captureTime || new Date();
+    document.getElementById('fecha-hora').textContent =
+      t.toLocaleDateString('es-ES', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) +
+      ' · ' + t.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
+
+    // GPS
+    document.getElementById('coords').textContent =
+      gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible';
+    document.getElementById('ubicacion').textContent =
+      gpsData?.address || (gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible');
+
+    if (parsed.confianza === 'alta') {
+      aiStatus.innerHTML = svgCheck() + '<span>Número extraído correctamente. Puedes editarlo si es necesario.</span>';
+      aiStatus.className = 'status success';
+    } else {
+      aiStatus.innerHTML = svgWarn() + '<span>Confianza ' + (parsed.confianza || 'baja') + ' — revisa y corrige el número si hace falta.</span>';
+      aiStatus.className = 'status warning';
+    }
+
+    datosCard.classList.remove('hidden');
+    document.getElementById('btn-subir').classList.remove('hidden');
+    document.getElementById('btn-retomar').classList.remove('hidden');
+
+  } catch(err) {
+    aiStatus.innerHTML = svgError() + '<span>Error al analizar la imagen: ' + err.message + '</span>';
+    aiStatus.className = 'status error';
+  }
+});
+
+document.getElementById('btn-retomar').addEventListener('click', () => {
+  setStep(1);
+  document.getElementById('panel-datos').classList.add('hidden');
+  document.getElementById('panel-foto').classList.remove('hidden');
+  fileInput.value = '';
+  imageBase64 = null;
+  previewImg.style.display = 'none';
+  camZone.style.display = 'flex';
+  btnAnalizar.disabled = true;
+  gpsStatus.classList.add('hidden');
+});
+
+// ============================================================
+//  PASO 3 — SUBIDA A GOOGLE DRIVE VÍA APPS SCRIPT
+// ============================================================
+document.getElementById('btn-subir').addEventListener('click', async () => {
+  setStep(3);
+  document.getElementById('panel-datos').classList.add('hidden');
+  document.getElementById('panel-drive').classList.remove('hidden');
+
+  const driveStatus = document.getElementById('drive-status');
+  const resultCard  = document.getElementById('result-card');
+
+  const numero     = document.getElementById('num-albaran').value.trim() || 'SIN-NUMERO';
+  const fechaHora  = document.getElementById('fecha-hora').textContent;
+  const direccion  = document.getElementById('ubicacion').textContent;
+
+  try {
+    const resp = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' }, // Apps Script requiere text/plain para CORS
+      body: JSON.stringify({
+        image:      imageBase64,
+        mime:       imageMime,
+        numero:     numero,
+        fechaHora:  fechaHora,
+        lat:        gpsData?.lat || '',
+        lng:        gpsData?.lng || '',
+        direccion:  direccion
+      })
+    });
+
+    const result = await resp.json();
+
+    if (result.ok) {
+      driveStatus.innerHTML = svgCheck() + '<span>PDF guardado correctamente en Google Drive</span>';
+      driveStatus.className = 'status success';
+      document.getElementById('drive-filename').textContent = result.nombre;
+      document.getElementById('drive-carpeta').textContent  = 'Albaranes / ' + result.carpeta;
+      const btnDrive = document.getElementById('btn-abrir-drive');
+      btnDrive.href = result.pdfUrl;
+      resultCard.classList.remove('hidden');
+      btnDrive.classList.remove('hidden');
+      document.getElementById('btn-nuevo').classList.remove('hidden');
+    } else {
+      throw new Error(result.error || 'Error desconocido en el servidor');
+    }
+  } catch(err) {
+    driveStatus.innerHTML = svgError() +
+      '<span>Error al subir a Drive: ' + err.message +
+      '<br><small>Comprueba que la URL del Apps Script está bien configurada en index.html</small></span>';
+    driveStatus.className = 'status error';
+    document.getElementById('btn-nuevo').classList.remove('hidden');
+  }
+});
+
+document.getElementById('btn-nuevo').addEventListener('click', () => {
+  // Reiniciar todo sin recargar (mejor UX en PWA)
+  imageBase64 = null; gpsData = null; captureTime = null;
+  fileInput.value = '';
+  previewImg.style.display = 'none';
+  camZone.style.display = 'flex';
+  btnAnalizar.disabled = true;
+  gpsStatus.classList.add('hidden');
+  document.getElementById('panel-drive').classList.add('hidden');
+  document.getElementById('panel-foto').classList.remove('hidden');
+  document.getElementById('result-card').classList.add('hidden');
+  document.getElementById('btn-abrir-drive').classList.add('hidden');
+  document.getElementById('btn-nuevo').classList.add('hidden');
+  setStep(1);
+});
+
+// ============================================================
+//  UTILIDADES
+// ============================================================
+function setStep(n) {
+  [1, 2, 3].forEach(i => {
+    const el  = document.getElementById('step' + i);
+    const num = el.querySelector('.step-num');
+    if (i < n) {
+      el.className = 'step-item done';
+      num.innerHTML = svgCheckSm();
+    } else if (i === n) {
+      el.className = 'step-item active';
+      num.textContent = i;
+    } else {
+      el.className = 'step-item';
+      num.textContent = i;
+    }
+  });
+}
+
+function svgCheck() {
+  return '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>';
+}
+function svgCheckSm() {
+  return '<svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>';
+}
+function svgWarn() {
+  return '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/></svg>';
+}
+function svgError() {
+  return '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>';
+}
+</script>
+</body>
+</html>
