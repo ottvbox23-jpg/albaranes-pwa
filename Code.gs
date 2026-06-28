@@ -106,7 +106,7 @@ function extraerNumeroConGemini(imagenBase64, mime) {
   }
 }
 
-// ── Generación del PDF (NUEVA ESTRUCTURA DE 2 PÁGINAS) ───────────────────────
+// ── Generación del PDF (CORREGIDO: 2 PÁGINAS Y FORMATO PDF REAL) ─────────────
 function generarPDF(imagenBase64, mime, numero, fecha, direccion, lat, lng) {
   var fechaLarga = Utilities.formatDate(fecha, Session.getScriptTimeZone(), "EEEE, d 'de' MMMM 'de' yyyy");
   var hora       = Utilities.formatDate(fecha, Session.getScriptTimeZone(), "HH:mm");
@@ -172,7 +172,8 @@ function generarPDF(imagenBase64, mime, numero, fecha, direccion, lat, lng) {
     
     '</body></html>';
 
-  return HtmlService.createHtmlOutput(html).getBlob().setName('albaran.pdf');
+  // AQUÍ ESTÁ EL CAMBIO CLAVE (MimeType.PDF) PARA QUE NO TE SALGA TEXTO PLANO EN DRIVE
+  return HtmlService.createHtmlOutput(html).getAs(MimeType.PDF).setName('albaran.pdf');
 }
 
 // ── Registro en Google Sheets ────────────────────────────────
