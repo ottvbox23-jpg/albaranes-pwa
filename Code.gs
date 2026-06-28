@@ -9,17 +9,27 @@ var CARPETA_RAIZ   = "Albaranes";
 // ── POST: recibe foto + datos desde la PWA ───────────────────
 function doPost(e) {
   try {
-    var payload = JSON.parse(e.postData.contents);
+    // Soporta tanto JSON directo como FormData
+    var payload;
+    if (e.postData && e.postData.type === 'application/json') {
+      payload = JSON.parse(e.postData.contents);
+    } else if (e.parameter && e.parameter.data) {
+      payload = JSON.parse(e.parameter.data);
+    } else if (e.postData && e.postData.contents) {
+      payload = JSON.parse(e.postData.contents);
+    } else {
+      throw new Error('No se recibieron datos');
+    }
     var resultado = procesarAlbaran(payload);
-    return jsonResponse({ ok: true, nombre: resultado.nombre, carpeta: resultado.carpeta, pdfUrl: resultado.pdfUrl });
+    return jsonResponseCORS({ ok: true, nombre: resultado.nombre, carpeta: resultado.carpeta, pdfUrl: resultado.pdfUrl });
   } catch(err) {
-    return jsonResponse({ ok: false, error: err.toString() });
+    return jsonResponseCORS({ ok: false, error: err.toString() });
   }
 }
 
 // ── GET: test de conectividad ────────────────────────────────
 function doGet() {
-  return jsonResponse({ ok: true, msg: "Escáner de albaranes activo" });
+  return jsonResponseCORS({ ok: true, msg: "Escáner de albaranes activo" });
 }
 
 // ── Lógica principal ─────────────────────────────────────────
@@ -71,7 +81,7 @@ function extraerNumeroConGemini(imagenBase64, mime) {
       contents: [{
         parts: [
           { inline_data: { mime_type: mime, data: imagenBase64 } },
-          { text: 'Eres un extractor de datos de documentos logísticos. Analiza esta imagen de un albarán y extrae el número de albarán principal (puede ser alfanumérico, con prefijos ALB, DN, DEL, o solo números). Responde ÚNICAMENTE con JSON sin markdown: {"numero_albaran":"..."}. Si no encuentras número usa "NO_ENCONTRADO".' }
+          { text: 'Eres un extractor de datos de documentos logísticos. Analiza esta imagen de un albarán de entrega y extrae el número de albarán principal siguiendo estas reglas en orden de prioridad: 1) Busca un número que empiece por 800 (formato 800XXXXX, puede tener 8 o más dígitos) — ese es el número de albarán. 2) Si no hay ninguno que empiece por 800, busca el número más prominente del documento, normalmente situado en la parte superior derecha o junto a la palabra "Albarán", "Nº", "Núm.", "Ref." o similar. 3) Ignora fechas, códigos postales, teléfonos y números de artículo o cantidad. Responde ÚNICAMENTE con JSON sin markdown: {"numero_albaran":"..."}. Si no encuentras ningún número usa "NO_ENCONTRADO".' }
         ]
       }],
       generationConfig: { maxOutputTokens: 100, temperature: 0 }
@@ -96,41 +106,70 @@ function extraerNumeroConGemini(imagenBase64, mime) {
   }
 }
 
-// ── Generación del PDF ───────────────────────────────────────
+// ── Generación del PDF (NUEVA ESTRUCTURA DE 2 PÁGINAS) ───────────────────────
 function generarPDF(imagenBase64, mime, numero, fecha, direccion, lat, lng) {
   var fechaLarga = Utilities.formatDate(fecha, Session.getScriptTimeZone(), "EEEE, d 'de' MMMM 'de' yyyy");
   var hora       = Utilities.formatDate(fecha, Session.getScriptTimeZone(), "HH:mm");
-  var mapsUrl    = (lat && lng) ? 'https://www.google.com/maps?q=' + lat + ',' + lng : '';
+  
+  // URL oficial y dinámica de Google Maps para las coordenadas
+  var mapsUrl    = (lat && lng) ? 'https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lng : '';
   var imageSrc   = 'data:' + mime + ';base64,' + imagenBase64;
 
   var html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>' +
-    'body{font-family:Arial,sans-serif;margin:0;padding:28px;color:#1a1a1a;font-size:13px}' +
+    'body{font-family:Arial,sans-serif;margin:0;padding:0;color:#1a1a1a;font-size:13px}' +
+    
+    /* Manejo del salto de página en la conversión a PDF */
+    '.page{box-sizing:border-box;padding:28px;min-height:100%;page-break-after:always}' +
+    '.page:last-child{page-break-after:avoid}' +
+    
+    /* Contenedor para que la foto mantenga su tamaño original */
+    '.photo-container{width:100%;text-align:center}' +
+    '.photo-container img{max-width:100%;height:auto;max-height:90vh;border-radius:6px;border:1px solid #e0e0e0;object-fit:contain}' +
+    '.photo-title{font-size:14px;color:#666;font-weight:700;margin-bottom:15px;text-transform:uppercase;letter-spacing:.05em}' +
+    
+    /* Diseño de la tabla de datos */
     '.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #185FA5;padding-bottom:14px;margin-bottom:20px}' +
     '.header h1{font-size:20px;font-weight:700;color:#185FA5;margin:0}' +
     '.num{font-size:26px;font-weight:700;text-align:right}' +
     '.num-label{font-size:10px;color:#888;text-align:right;text-transform:uppercase;letter-spacing:.05em}' +
     '.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px}' +
-    '.dato{background:#f5f7fa;border-radius:6px;padding:10px 12px}' +
-    '.dato label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:3px}' +
-    '.dato span{font-size:13px;font-weight:500}' +
+    '.dato{background:#f5f7fa;border-radius:6px;padding:12px 14px}' +
+    '.dato label{font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.06em;display:block;margin-bottom:5px}' +
+    '.dato span{font-size:14px;font-weight:500;line-height:1.4}' +
     '.full{grid-column:1/-1}' +
-    'h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#666;border-bottom:.5px solid #ddd;padding-bottom:6px;margin-bottom:12px}' +
-    'img{width:100%;border-radius:6px;border:1px solid #e0e0e0}' +
-    '.footer{margin-top:20px;padding-top:12px;border-top:.5px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between}' +
+    '.maps-link{color:#185FA5;font-weight:700;text-decoration:none;display:inline-block;margin-top:5px}' +
+    
+    '.footer{margin-top:40px;padding-top:12px;border-top:.5px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between}' +
     '</style></head><body>' +
-    '<div class="header">' +
-    '  <div><h1>Albarán firmado</h1><div style="color:#666;font-size:11px;margin-top:3px">Registro de entrega</div></div>' +
-    '  <div><div class="num-label">Nº Albarán</div><div class="num">' + numero + '</div></div>' +
+    
+    /* 📄 PÁGINA 1: La foto del albarán a tamaño completo */
+    '<div class="page">' +
+    '  <div class="photo-container">' +
+    '    <div class="photo-title">Documento Original Digitalizado</div>' +
+    '    <img src="' + imageSrc + '" alt="Albarán Fotografiado"/>' +
+    '  </div>' +
     '</div>' +
-    '<div class="grid">' +
-    '  <div class="dato"><label>Fecha</label><span>' + fechaLarga + '</span></div>' +
-    '  <div class="dato"><label>Hora</label><span>' + hora + '</span></div>' +
-    '  <div class="dato full"><label>Ubicación de entrega</label><span>' + direccion + '</span></div>' +
-    (lat && lng ? '  <div class="dato full"><label>Coordenadas GPS</label><span>' + lat + ', ' + lng + (mapsUrl ? ' — <a href="' + mapsUrl + '">Ver en Maps</a>' : '') + '</span></div>' : '') +
+    
+    /* 📄 PÁGINA 2: Cuadro de metadatos de entrega */
+    '<div class="page">' +
+    '  <div class="header">' +
+    '    <div><h1>Datos de Entrega</h1><div style="color:#666;font-size:11px;margin-top:3px">Información extraída y validación GPS</div></div>' +
+    '    <div><div class="num-label">Nº Albarán</div><div class="num">' + numero + '</div></div>' +
+    '  </div>' +
+    '  <div class="grid">' +
+    '    <div class="dato"><label>Fecha de Entrega</label><span>' + fechaLarga + '</span></div>' +
+    '    <div class="dato"><label>Hora de Entrega</label><span>' + hora + '</span></div>' +
+    '    <div class="dato full"><label>Lugar / Dirección</label><span>' + direccion + '</span></div>' +
+         (lat && lng ? 
+    '    <div class="dato full"><label>Ubicación Geoposicionada</label>' +
+    '         <span>Coordenadas: ' + lat + ', ' + lng + '<br>' +
+              (mapsUrl ? '<a class="maps-link" href="' + mapsUrl + '" target="_blank">📍 Abrir ubicación en Google Maps</a>' : '') +
+    '         </span>' +
+    '    </div>' : '') +
+    '  </div>' +
+    '  <div class="footer"><span>Generado automáticamente vía Escáner Albaranes PWA</span><span>' + fecha.toISOString() + '</span></div>' +
     '</div>' +
-    '<h2>Documento fotografiado</h2>' +
-    '<img src="' + imageSrc + '" alt="Albarán"/>' +
-    '<div class="footer"><span>Generado automáticamente</span><span>' + fecha.toISOString() + '</span></div>' +
+    
     '</body></html>';
 
   return HtmlService.createHtmlOutput(html).getBlob().setName('albaran.pdf');
@@ -167,8 +206,13 @@ function obtenerOCrearCarpeta(nombre, padre) {
   return it.hasNext() ? it.next() : base.createFolder(nombre);
 }
 
-function jsonResponse(obj) {
-  return ContentService
+function jsonResponseCORS(obj) {
+  var output = ContentService
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
+  return output;
+}
+
+function jsonResponse(obj) {
+  return jsonResponseCORS(obj);
 }
