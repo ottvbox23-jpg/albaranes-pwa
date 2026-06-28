@@ -12,18 +12,12 @@
   <link rel="manifest" href="manifest.json" />
 
   <!-- ================================================================
-       🔧 CONFIGURACIÓN — EDITA ESTAS DOS LÍNEAS
+       🔧 CONFIGURACIÓN — EDITA SOLO ESTA LÍNEA
        ================================================================ -->
   <script>
-    // 1. Pega aquí la URL de tu Google Apps Script desplegado
-    //    (Desplegar > Nueva implementación > Aplicación web > Copiar URL)
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbrWRVhm14GDzkxaQlgrF1z5sak0K7L-CgN1XKeIVzfrf--Ue7fLRTRCc43Eb73sNRmg/exec
-
-";
-
-    // 2. Pega aquí tu API Key de Google Gemini
-    //    (aistudio.google.com > Get API Key)
-    const GEMINI_API_KEY = "AKfycbwbrWRVhm14GDzkxaQlgrF1z5sak0K7L-CgN1XKeIVzfrf--Ue7fLRTRCc43Eb73sNRmg";
+    // Pega aquí la URL de tu Google Apps Script desplegado
+    // (Desplegar > Nueva implementación > Aplicación web > Copiar URL)
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwbrWRVhm14GDzkxaQlgrF1z5sak0K7L-CgN1XKeIVzfrf--Ue7fLRTRCc43Eb73sNRmg/exec";
   </script>
   <!-- ================================================================ -->
 
@@ -490,7 +484,7 @@ function mostrarGPSError() {
 }
 
 // ============================================================
-//  PASO 2 — ANÁLISIS IA
+//  PASO 2 — ENVIAR AL APPS SCRIPT (que hace IA + Drive)
 // ============================================================
 btnAnalizar.addEventListener('click', async () => {
   setStep(2);
@@ -500,70 +494,24 @@ btnAnalizar.addEventListener('click', async () => {
   const aiStatus  = document.getElementById('ai-status');
   const datosCard = document.getElementById('datos-card');
 
-  try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: imageMime, data: imageBase64 }
-            },
-            {
-              type: 'text',
-              text: 'Eres un extractor de datos de documentos logísticos. Analiza esta imagen de un albarán y extrae el número de albarán principal (puede ser alfanumérico, con prefijos ALB, DN, DEL, o solo números). Responde ÚNICAMENTE con JSON sin markdown ni explicación: {"numero_albaran":"...","confianza":"alta|media|baja"}. Si no encuentras número, usa "NO_ENCONTRADO".'
-            }
-          ]
-        }]
-      })
-    });
+  // Fecha y hora de captura
+  const t = captureTime || new Date();
+  document.getElementById('fecha-hora').textContent =
+    t.toLocaleDateString('es-ES', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) +
+    ' · ' + t.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
 
-    const data = await resp.json();
-    const texto = (data.content || []).map(b => b.text || '').join('');
-    let parsed = { numero_albaran: 'NO_ENCONTRADO', confianza: 'baja' };
-    try { parsed = JSON.parse(texto.replace(/```[a-z]*|```/g, '').trim()); } catch(_) {}
+  // GPS
+  document.getElementById('coords').textContent =
+    gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible';
+  document.getElementById('ubicacion').textContent =
+    gpsData?.address || (gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible');
 
-    const num = parsed.numero_albaran;
-    document.getElementById('num-albaran').value = (num && num !== 'NO_ENCONTRADO') ? num : '';
+  aiStatus.innerHTML = svgCheck() + '<span>Foto lista. Revisa los datos y pulsa "Subir a Drive".</span>';
+  aiStatus.className = 'status success';
 
-    // Fecha y hora
-    const t = captureTime || new Date();
-    document.getElementById('fecha-hora').textContent =
-      t.toLocaleDateString('es-ES', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) +
-      ' · ' + t.toLocaleTimeString('es-ES', { hour:'2-digit', minute:'2-digit' });
-
-    // GPS
-    document.getElementById('coords').textContent =
-      gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible';
-    document.getElementById('ubicacion').textContent =
-      gpsData?.address || (gpsData?.lat ? `${gpsData.lat}, ${gpsData.lng}` : 'No disponible');
-
-    if (parsed.confianza === 'alta') {
-      aiStatus.innerHTML = svgCheck() + '<span>Número extraído correctamente. Puedes editarlo si es necesario.</span>';
-      aiStatus.className = 'status success';
-    } else {
-      aiStatus.innerHTML = svgWarn() + '<span>Confianza ' + (parsed.confianza || 'baja') + ' — revisa y corrige el número si hace falta.</span>';
-      aiStatus.className = 'status warning';
-    }
-
-    datosCard.classList.remove('hidden');
-    document.getElementById('btn-subir').classList.remove('hidden');
-    document.getElementById('btn-retomar').classList.remove('hidden');
-
-  } catch(err) {
-    aiStatus.innerHTML = svgError() + '<span>Error al analizar la imagen: ' + err.message + '</span>';
-    aiStatus.className = 'status error';
-  }
+  datosCard.classList.remove('hidden');
+  document.getElementById('btn-subir').classList.remove('hidden');
+  document.getElementById('btn-retomar').classList.remove('hidden');
 });
 
 document.getElementById('btn-retomar').addEventListener('click', () => {
