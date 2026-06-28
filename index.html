@@ -17,7 +17,7 @@
   <script>
     // Pega aquí la URL de tu Google Apps Script desplegado
     // (Desplegar > Nueva implementación > Aplicación web > Copiar URL)
-    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbytZhWk6dtIuzs1Is5e5q4kd3kA4WOQd9i5l474MnhzMLKKqYQkDahF1EVgzj2Z0NB1VQ/exec";
+    const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzmRb_K4Wvbq-3xFufhutzG29o-ew_UowS-BhcSr3qpHsmry2DXuDmuxINyyIXSxEWEpg/exec";
   </script>
   <!-- ================================================================ -->
 
@@ -542,18 +542,21 @@ document.getElementById('btn-subir').addEventListener('click', async () => {
   const direccion  = document.getElementById('ubicacion').textContent;
 
   try {
+    // Usamos FormData para evitar el preflight CORS de Apps Script
+    const formData = new FormData();
+    formData.append('data', JSON.stringify({
+      image:     imageBase64,
+      mime:      imageMime,
+      numero:    numero,
+      fechaHora: fechaHora,
+      lat:       gpsData?.lat || '',
+      lng:       gpsData?.lng || '',
+      direccion: direccion
+    }));
+
     const resp = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'text/plain' }, // Apps Script requiere text/plain para CORS
-      body: JSON.stringify({
-        image:      imageBase64,
-        mime:       imageMime,
-        numero:     numero,
-        fechaHora:  fechaHora,
-        lat:        gpsData?.lat || '',
-        lng:        gpsData?.lng || '',
-        direccion:  direccion
-      })
+      body: formData
     });
 
     const result = await resp.json();
